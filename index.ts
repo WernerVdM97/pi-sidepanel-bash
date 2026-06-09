@@ -130,8 +130,8 @@ export default function (pi: ExtensionAPI) {
 		try {
 			const entries: SessionEntry[] = ctx.sessionManager.getEntries();
 
-			// Cap: max 500 entries to prevent freeze on huge sessions
-			const capped = entries.slice(-500);
+			// Cap: max 250 entries to prevent memory blowup on large sessions
+			const capped = entries.slice(-250);
 			for (const e of capped) {
 				if (e.type !== "message") continue;
 				const m = e.message;

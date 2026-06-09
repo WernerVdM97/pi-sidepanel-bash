@@ -1,6 +1,6 @@
 # pi-sidepanel-bash
 
-Bash command history tab for [pi-sidepanel](../pi-sidepanel). Session-persistent, vim-style cursor navigation, expand/collapse command details, output viewer, search, syntax highlighting, and full theme color support. Most recent commands appear at the top.
+Bash command history tab for [pi-sidepanel](https://github.com/WernerVdM97/pi-sidepanel). Session-persistent, vim-style cursor navigation, expand/collapse command details, output viewer, search, syntax highlighting, and full theme color support. Most recent commands appear at the top.
 
 ## Keybindings
 

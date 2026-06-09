@@ -26,9 +26,9 @@ export interface BashEntryInput {
 
 export class BashLog {
 	/** Max stored output bytes per entry. Larger outputs clipped with `…`. */
-	MAX_OUTPUT_BYTES = 50_000;
+	MAX_OUTPUT_BYTES = 10_000;
 	/** Max entries in log. Oldest evicted when exceeded. */
-	MAX_ENTRIES = 500;
+	MAX_ENTRIES = 250;
 
 	entries: BashEntry[] = [];
 	cursor = -1;

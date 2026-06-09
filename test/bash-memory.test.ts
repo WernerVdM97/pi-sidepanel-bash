@@ -2,8 +2,8 @@
  * Memory-safety tests for BashLog
  *
  * Verifies that BashLog enforces caps on:
- * - Stored output size per entry (max 50KB)
- * - Total number of entries (max 500)
+ * - Stored output size per entry (max 10KB)
+ * - Total number of entries (max 250)
  * - Entry eviction (LRU, oldest dropped first)
  *
  * Run: node --test test/bash-memory.test.ts
@@ -16,9 +16,9 @@ import { BashLog } from "../log.ts";
 // ── Output truncation ────────────────────────────────────────────────────
 
 describe("BashLog output truncation", () => {
-	it("truncates output exceeding MAX_OUTPUT_BYTES (50KB)", () => {
+	it("truncates output exceeding MAX_OUTPUT_BYTES (10KB)", () => {
 		const log = new BashLog();
-		// Generate 100KB of output
+		// Generate 100KB of output (well over 10KB cap)
 		const bigOutput = "x".repeat(100_000);
 
 		log.add({ id: "t1", command: "cat huge.txt" });
@@ -79,10 +79,10 @@ describe("BashLog output truncation", () => {
 // ── Entry cap and eviction ───────────────────────────────────────────────
 
 describe("BashLog entry cap and eviction", () => {
-	it("caps entries at MAX_ENTRIES (500)", () => {
+	it("caps entries at MAX_ENTRIES (250)", () => {
 		const log = new BashLog();
-		// Add 600 entries
-		for (let i = 0; i < 600; i++) {
+		// Add 300 entries
+		for (let i = 0; i < 300; i++) {
 			log.add({ id: `t${i}`, command: `cmd ${i}` });
 		}
 
@@ -94,14 +94,14 @@ describe("BashLog entry cap and eviction", () => {
 
 	it("evicts oldest entries when cap exceeded (unshift = newest first)", () => {
 		const log = new BashLog();
-		// Add 501 entries — newest unshifted to front
-		for (let i = 0; i < 501; i++) {
+		// Add 251 entries — newest unshifted to front, oldest popped
+		for (let i = 0; i < 251; i++) {
 			log.add({ id: `t${i}`, command: `cmd ${i}` });
 		}
 
-		// Newest (cmd 500) should be at index 0
-		assert.equal(log.entries[0]!.command, "cmd 500");
-		// Oldest surviving at tail
+		// Newest (cmd 250) should be at index 0
+		assert.equal(log.entries[0]!.command, "cmd 250");
+		// With MAX_ENTRIES=250, cmd 0 was evicted, oldest surviving is cmd 1
 		const oldest = log.entries[log.entries.length - 1]!;
 		assert.equal(oldest.command, "cmd 1"); // cmd 0 should be evicted
 		// Verify evicted entry is gone
