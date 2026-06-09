@@ -457,6 +457,21 @@ export function renderLog(log: BashLog, width: number): string[] {
 		const theme = log._theme;
 		const lines: string[] = [];
 
+		// Keymap footer line
+		const footer =
+			theme?.fg(
+				"dim",
+				ansiTruncate(
+					" j/k navigate │ Enter detail │ o output │ / search │ g/G top/bot",
+					width,
+					"",
+				),
+			) ?? ansiTruncate(
+				" j/k navigate │ Enter detail │ o output │ / search │ g/G top/bot",
+				width,
+				"",
+			);
+
 		// Command detail view (Enter)
 		if (log.viewMode === "command" && log.cursor >= 0) {
 			const entry = log.entries[log.cursor];
@@ -509,6 +524,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 					}
 				}
 			}
+			lines.push(footer);
 			return lines;
 		}
 
@@ -554,6 +570,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 					lines.push(" (no output)");
 				}
 			}
+			lines.push(footer);
 			return lines;
 		}
 
@@ -564,6 +581,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 
 		if (total === 0 && !log.searchMode) {
 			lines.push(" No bash commands yet");
+			lines.push(footer);
 			return lines;
 		}
 
@@ -605,6 +623,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 			lines.push(`${cursor}${prefix}${icon}${cmd}`);
 		}
 
+		lines.push(footer);
 		return lines;
 	} catch {
 		return [" Error rendering bash tab"];
