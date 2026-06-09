@@ -25,6 +25,11 @@ export interface BashEntryInput {
 // ── BashLog ───────────────────────────────────────────────────────────────
 
 export class BashLog {
+	/** Max stored output bytes per entry. Larger outputs clipped with `…`. */
+	MAX_OUTPUT_BYTES = 50_000;
+	/** Max entries in log. Oldest evicted when exceeded. */
+	MAX_ENTRIES = 500;
+
 	entries: BashEntry[] = [];
 	cursor = -1;
 	viewMode: "commands" | "command" | "output" = "commands";
@@ -33,6 +38,12 @@ export class BashLog {
 	searchMode = false;
 	private _pendingG = false;
 	_theme: ThemeColors | null = null;
+
+	/** Truncate output to MAX_OUTPUT_BYTES. Appends `…` if clipped. */
+	private trimOutput(raw: string): string {
+		if (raw.length <= this.MAX_OUTPUT_BYTES) return raw;
+		return raw.slice(0, this.MAX_OUTPUT_BYTES - 1) + "…";
+	}
 
 	setTheme(theme: ThemeColors): void {
 		this._theme = theme;
@@ -43,18 +54,23 @@ export class BashLog {
 			id: input.id,
 			command: input.command,
 			exitCode: input.exitCode ?? null,
-			output: input.output ?? "",
+			output: this.trimOutput(input.output ?? ""),
 			timestamp: input.timestamp ?? Date.now(),
 			source: input.source ?? "live",
 		});
 		if (this.cursor >= 0) this.cursor++;
+		// Evict oldest entries when over cap
+		while (this.entries.length > this.MAX_ENTRIES) {
+			this.entries.pop();
+			if (this.cursor > 0) this.cursor = Math.max(0, this.cursor - 1);
+		}
 	}
 
 	setResult(id: string, result: { exitCode: number; output: string }): void {
 		const entry = this.entries.find((e) => e.id === id);
 		if (!entry) return;
 		entry.exitCode = result.exitCode;
-		entry.output = result.output;
+		entry.output = this.trimOutput(result.output);
 	}
 
 	reset(): void {
