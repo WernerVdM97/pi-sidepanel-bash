@@ -466,7 +466,8 @@ export function renderLog(log: BashLog, width: number): string[] {
 					width,
 					"",
 				),
-			) ?? ansiTruncate(
+			) ??
+			ansiTruncate(
 				" j/k navigate │ Enter detail │ o output │ / search │ g/G top/bot",
 				width,
 				"",
@@ -524,6 +525,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 					}
 				}
 			}
+			while (lines.length < 39) lines.push("");
 			lines.push(footer);
 			return lines;
 		}
@@ -570,6 +572,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 					lines.push(" (no output)");
 				}
 			}
+			while (lines.length < 39) lines.push("");
 			lines.push(footer);
 			return lines;
 		}
@@ -581,6 +584,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 
 		if (total === 0 && !log.searchMode) {
 			lines.push(" No bash commands yet");
+			while (lines.length < 39) lines.push("");
 			lines.push(footer);
 			return lines;
 		}
@@ -623,6 +627,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 			lines.push(`${cursor}${prefix}${icon}${cmd}`);
 		}
 
+		while (lines.length < 39) lines.push("");
 		lines.push(footer);
 		return lines;
 	} catch {
