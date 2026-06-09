@@ -61,6 +61,11 @@ export default function (pi: ExtensionAPI) {
 					setTheme(theme: any): void {
 						log.setTheme(theme);
 					},
+					// While search mode is active the framework must NOT steal
+					// digit keys for tab-switching — they belong to the query.
+					capturesText(): boolean {
+						return log.searchMode;
+					},
 					handleInput(data: string): void {
 						// ── Search mode ──────────────────────────────
 						if (log.searchMode) {
@@ -110,8 +115,8 @@ export default function (pi: ExtensionAPI) {
 						});
 					},
 
-					render(width: number): string[] {
-						return renderLog(log, width);
+					render(width: number, height?: number): string[] {
+						return renderLog(log, width, height);
 					},
 
 					invalidate(): void {},
@@ -128,8 +133,13 @@ export default function (pi: ExtensionAPI) {
 		log.reset();
 		registered = false;
 
-		// Register tab immediately — framework shows empty state while we replay
+		// Register immediately, then flag the tab busy so the framework shows a
+		// loading placeholder while we replay. Replay is synchronous and can
+		// block on large sessions; yield one frame first so the placeholder
+		// actually paints instead of the previous/frozen view.
 		registerTab();
+		pi.events.emit("sidepanel:busy", { tabId: "bash", busy: true });
+		await new Promise((resolve) => setTimeout(resolve, 24));
 
 		try {
 			const entries: SessionEntry[] = ctx.sessionManager.getEntries();
@@ -173,10 +183,12 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 
-			// Emit invalidation so framework re-renders with full data
-			pi.events.emit("sidepanel:invalidate", { tabId: "bash" });
 		} catch {
 			// Replay failed — tab already registered with empty state
+		} finally {
+			// Clear the busy flag and re-render with the replayed data.
+			pi.events.emit("sidepanel:busy", { tabId: "bash", busy: false });
+			pi.events.emit("sidepanel:invalidate", { tabId: "bash" });
 		}
 	});
 

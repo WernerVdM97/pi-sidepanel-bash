@@ -377,64 +377,135 @@ function colorize(tokens: Token[], theme: ThemeColors | null): string {
 }
 
 // ── ANSI-aware helpers ───────────────────────────────────────────────────
+//
+// These mirror pi-tui's `visibleWidth`/`truncateToWidth` width model so the
+// Bash tab agrees with the framework's safety clamp: graphemes are the unit
+// (not UTF-16 code units, which would split emoji/CJK surrogate pairs), and
+// wide East-Asian / emoji clusters count as 2 cells. Kept dependency-free so
+// log.ts stays importable in unit tests without resolving @earendil-works/*.
 
-/** Count visible characters, skipping ANSI escape sequences. */
+// Grapheme segmentation via Intl.Segmenter when available. Created lazily and
+// guarded: a runtime built without full ICU throws on construction, and doing
+// that at module load would take the whole Bash tab down. When unavailable we
+// fall back to code-point iteration (still wide-char aware, just no clustering
+// of ZWJ emoji sequences).
+let _segmenter: Intl.Segmenter | null | undefined;
+function segmentGraphemes(str: string): string[] {
+	if (_segmenter === undefined) {
+		try {
+			_segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+		} catch {
+			_segmenter = null;
+		}
+	}
+	if (_segmenter) {
+		const out: string[] = [];
+		for (const { segment } of _segmenter.segment(str)) out.push(segment);
+		return out;
+	}
+	return [...str]; // code-point fallback (astral-safe)
+}
+
+/** Matches a single CSI escape sequence (e.g. SGR color codes). */
+const ANSI_RE = /\x1b\[[0-9;?=]*[A-Za-z]/g;
+
+/** Display width of a single code point: 0 (combining/zero-width), 2 (wide
+ *  East-Asian / emoji), or 1 (everything else, incl. "ambiguous"). */
+function codePointWidth(cp: number): number {
+	// Combining marks and common zero-width characters.
+	if (
+		cp === 0x200b || // zero-width space
+		(cp >= 0x0300 && cp <= 0x036f) || // combining diacritical marks
+		(cp >= 0x200c && cp <= 0x200f) // ZWNJ, ZWJ, LRM, RLM
+	) {
+		return 0;
+	}
+	// Wide ranges: CJK, Hangul, Kana, fullwidth forms, emoji, etc.
+	if (
+		(cp >= 0x1100 && cp <= 0x115f) || // Hangul Jamo
+		(cp >= 0x2e80 && cp <= 0x303e) || // CJK radicals … Kangxi
+		(cp >= 0x3041 && cp <= 0x33ff) || // Hiragana … CJK compat
+		(cp >= 0x3400 && cp <= 0x4dbf) || // CJK Ext A
+		(cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
+		(cp >= 0xa000 && cp <= 0xa4cf) || // Yi
+		(cp >= 0xac00 && cp <= 0xd7a3) || // Hangul Syllables
+		(cp >= 0xf900 && cp <= 0xfaff) || // CJK Compat Ideographs
+		(cp >= 0xfe30 && cp <= 0xfe4f) || // CJK Compatibility Forms
+		(cp >= 0xff00 && cp <= 0xff60) || // Fullwidth Forms
+		(cp >= 0xffe0 && cp <= 0xffe6) || // Fullwidth signs
+		(cp >= 0x1f1e6 && cp <= 0x1f1ff) || // Regional indicators
+		(cp >= 0x1f300 && cp <= 0x1faff) || // Emoji, pictographs, symbols
+		(cp >= 0x20000 && cp <= 0x3fffd) // CJK Ext B and beyond
+	) {
+		return 2;
+	}
+	return 1;
+}
+
+/** Width of one grapheme cluster (the leading code point decides; ZWJ emoji
+ *  sequences thus count once, as 2). */
+function graphemeCells(segment: string): number {
+	const cp = segment.codePointAt(0);
+	return cp === undefined ? 0 : codePointWidth(cp);
+}
+
+/** Split a string into ordered ANSI / text tokens, preserving sequence. */
+function tokenizeAnsi(str: string): { ansi: boolean; value: string }[] {
+	const tokens: { ansi: boolean; value: string }[] = [];
+	let last = 0;
+	let m: RegExpExecArray | null;
+	ANSI_RE.lastIndex = 0;
+	while ((m = ANSI_RE.exec(str)) !== null) {
+		if (m.index > last) {
+			tokens.push({ ansi: false, value: str.slice(last, m.index) });
+		}
+		tokens.push({ ansi: true, value: m[0] });
+		last = ANSI_RE.lastIndex;
+	}
+	if (last < str.length) tokens.push({ ansi: false, value: str.slice(last) });
+	return tokens;
+}
+
+/** Count visible cells, skipping ANSI escape sequences and respecting
+ *  wide-character / grapheme width. */
 export function ansiLen(str: string): number {
+	const clean = str.replace(ANSI_RE, "");
 	let n = 0;
-	let esc = false;
-	for (let i = 0; i < str.length; i++) {
-		if (str[i] === "\x1b" && str[i + 1] === "[") {
-			esc = true;
-			continue;
-		}
-		if (esc) {
-			if (str[i] === "m") esc = false;
-			continue;
-		}
-		n++;
+	for (const segment of segmentGraphemes(clean)) {
+		n += graphemeCells(segment);
 	}
 	return n;
 }
 
-/** Truncate an ANSI-string to max visible width, appending ellipsis. */
+/** Truncate an ANSI-string to max visible width, appending ellipsis and
+ *  closing any open SGR so colors don't bleed into the panel borders. */
 export function ansiTruncate(str: string, maxW: number, ellip = "…"): string {
 	if (maxW <= 0) return "";
 
-	const strLen = ansiLen(str);
-	// Text fits without truncation — just close any open SGR codes
-	if (strLen <= maxW) {
-		const hasAnsi = str.includes("\x1b[");
-		return hasAnsi ? str + "\x1b[0m" : str;
+	// Text fits without truncation — just close any open SGR codes.
+	if (ansiLen(str) <= maxW) {
+		return str.includes("\x1b[") ? str + "\x1b[0m" : str;
 	}
 
-	// Truncate, leaving room for ellipsis
+	// Truncate, leaving room for the ellipsis.
 	const targetW = Math.max(0, maxW - ansiLen(ellip));
 	let out = "";
 	let vis = 0;
-	let esc = false;
-	let buf = "";
-	for (let i = 0; i < str.length; i++) {
-		const ch = str[i]!;
-		if (ch === "\x1b" && str[i + 1] === "[") {
-			esc = true;
-			buf = ch;
+	for (const tok of tokenizeAnsi(str)) {
+		if (tok.ansi) {
+			out += tok.value; // zero-width — always keep style codes
 			continue;
 		}
-		if (esc) {
-			buf += ch;
-			if (ch === "m") {
-				esc = false;
-				out += buf;
+		for (const segment of segmentGraphemes(tok.value)) {
+			const w = graphemeCells(segment);
+			if (vis + w > targetW) {
+				return out + ellip + "\x1b[0m";
 			}
-			continue;
+			out += segment;
+			vis += w;
 		}
-		if (vis >= targetW) break;
-		out += ch;
-		vis++;
 	}
-	out += ellip;
-	out += "\x1b[0m";
-	return out;
+	return out + ellip + "\x1b[0m";
 }
 
 /** Word-wrap an ANSI-colored string to a max visible width. */
@@ -462,12 +533,21 @@ function ansiWrap(str: string, maxW: number): string[] {
 
 // ── Rendering ────────────────────────────────────────────────────────────
 
-export function renderLog(log: BashLog, width: number): string[] {
+export function renderLog(
+	log: BashLog,
+	width: number,
+	height = 40,
+): string[] {
 	try {
 		const theme = log._theme;
 		const lines: string[] = [];
 
-		// Keymap footers (pinned to bottom of 40-line viewport)
+		// Content area height (passed by the framework; falls back to 40).
+		// The footer occupies the last row, so it's pinned at `height - 1`.
+		const H = Math.max(3, Math.floor(height));
+		const footerRow = H - 1;
+
+		// Keymap footers (pinned to bottom of the viewport)
 		const footer1 =
 			theme?.fg(
 				"dim",
@@ -535,7 +615,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 					}
 				}
 			}
-			while (lines.length < 39) lines.push("");
+			while (lines.length < footerRow) lines.push("");
 			lines.push(footer1);
 			return lines;
 		}
@@ -564,7 +644,11 @@ export function renderLog(log: BashLog, width: number): string[] {
 
 				// Git diff output has box-drawing chars and ANSI artifacts
 				// that break the panel — suppress and show a note instead.
-				const isGitDiff = /\bgit\b.*\bdiff\b/.test(entry.command);
+				// Match `git … diff` only at a command position (start of line
+				// or after a shell separator) so quoted/substring uses like
+				// `echo "git diff"` are not falsely suppressed.
+				const isGitDiff =
+					/(?:^|&&|\|\||[;|\n])\s*git\b[^|;&\n]*\bdiff\b/.test(entry.command);
 				if (entry.output) {
 					if (isGitDiff) {
 						lines.push(
@@ -578,7 +662,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 					} else {
 						const rawLines = entry.output.split("\n");
 						// Reserve 3 lines for header + separator + footer
-						const viewH = 37;
+						const viewH = Math.max(1, H - 3);
 						const maxS = Math.max(0, rawLines.length - viewH);
 						if (log.scrollOffset > maxS) log.scrollOffset = maxS;
 						const end = Math.min(rawLines.length, log.scrollOffset + viewH);
@@ -596,7 +680,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 					lines.push(" (no output)");
 				}
 			}
-			while (lines.length < 39) lines.push("");
+			while (lines.length < footerRow) lines.push("");
 			lines.push(footer1);
 			return lines;
 		}
@@ -604,11 +688,13 @@ export function renderLog(log: BashLog, width: number): string[] {
 		// Commands mode
 		const displayEntries = log.filteredEntries;
 		const total = displayEntries.length;
-		const viewH = 40;
+		// Reserve the last row for the footer (and account for the 2-row search
+		// header when active) so the list never overruns the footer.
+		const viewH = Math.max(1, footerRow - (log.searchMode ? 2 : 0));
 
 		if (total === 0 && !log.searchMode) {
 			lines.push(" No bash commands yet");
-			while (lines.length < 39) lines.push("");
+			while (lines.length < footerRow) lines.push("");
 			lines.push(footer1);
 			return lines;
 		}
@@ -651,10 +737,14 @@ export function renderLog(log: BashLog, width: number): string[] {
 			lines.push(`${cursor}${prefix}${icon}${cmd}`);
 		}
 
-		while (lines.length < 39) lines.push("");
+		while (lines.length < footerRow) lines.push("");
 		lines.push(footer1);
 		return lines;
-	} catch {
-		return [" Error rendering bash tab"];
+	} catch (err) {
+		// Surface the real error so a recurrence is diagnosable rather than
+		// an opaque "Error rendering bash tab". The framework truncates lines
+		// to the panel width, so a long message can't break the box.
+		const msg = err instanceof Error ? err.message : String(err);
+		return [` bash render error: ${msg}`];
 	}
 }

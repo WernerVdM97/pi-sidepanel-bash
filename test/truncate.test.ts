@@ -286,4 +286,90 @@ describe("renderLog git diff suppression", () => {
 			`BUG: output view returned ${lines.length} lines, should be <= 40`,
 		);
 	});
+
+	it("does NOT suppress 'git diff' inside a quoted string", () => {
+		// Regression: the old /\bgit\b.*\bdiff\b/ matched substrings anywhere.
+		const log = new BashLog();
+		log.add({
+			id: "t1",
+			command: 'echo "git diff"',
+			exitCode: 0,
+			output: "git diff",
+		});
+		log.cursor = 0;
+		log.toggleOutput();
+
+		const lines = renderLog(log, 40);
+		assert.ok(
+			!lines.some((l) => l.includes("suppressed")),
+			"quoted/substring 'git diff' must not be suppressed",
+		);
+	});
+});
+
+// ── Wide-character width (parity with pi-tui visibleWidth) ────────────────
+
+describe("ansiLen wide characters", () => {
+	it("counts CJK ideographs as width 2", () => {
+		assert.equal(ansiLen("你好"), 4);
+	});
+
+	it("counts emoji as width 2", () => {
+		assert.equal(ansiLen("🎉"), 2);
+	});
+
+	it("mixes narrow and wide correctly", () => {
+		assert.equal(ansiLen("a你b"), 4);
+	});
+
+	it("ignores ANSI around wide chars", () => {
+		assert.equal(ansiLen("\x1b[31m你好\x1b[0m"), 4);
+	});
+});
+
+describe("ansiTruncate wide characters", () => {
+	it("never exceeds maxW when truncating wide chars", () => {
+		const result = ansiTruncate("你好世界abc", 5);
+		assert.ok(
+			ansiLen(result) <= 5,
+			`visible width ${ansiLen(result)} exceeds 5: "${result}"`,
+		);
+	});
+
+	it("does not split a wide grapheme across the boundary", () => {
+		// targetW after ellipsis is odd → a width-2 char must not half-fit.
+		const result = ansiTruncate("你好你好", 3);
+		assert.ok(ansiLen(result) <= 3);
+	});
+});
+
+// ── Dynamic content height (B1) ───────────────────────────────────────────
+
+describe("renderLog content height", () => {
+	it("defaults to a 40-row viewport when height omitted", () => {
+		const log = new BashLog();
+		log.add({ id: "t1", command: "echo hi" });
+		assert.ok(renderLog(log, 40).length <= 40);
+	});
+
+	it("respects a smaller custom height", () => {
+		const log = new BashLog();
+		for (let i = 0; i < 50; i++) log.add({ id: `t${i}`, command: `cmd ${i}` });
+		const lines = renderLog(log, 40, 20);
+		assert.ok(
+			lines.length <= 20,
+			`expected <= 20 rows, got ${lines.length}`,
+		);
+	});
+
+	it("pins the footer to the last row at a custom height", () => {
+		const log = new BashLog();
+		log.add({ id: "t1", command: "echo hi" });
+		const lines = renderLog(log, 60, 12);
+		assert.equal(lines.length, 12);
+		assert.ok(
+			lines[11]!.includes("navigate"),
+			"footer keymap should occupy the final row",
+		);
+	});
 });
