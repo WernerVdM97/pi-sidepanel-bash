@@ -1,0 +1,10 @@
+{
+  "name": "pi-sidepanel-bash",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Bash command history tab for pi-sidepanel — session-persistent, vim-style cursor, search, detail/expand, output viewer, theme colors",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}
