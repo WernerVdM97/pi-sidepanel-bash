@@ -482,20 +482,6 @@ export function renderLog(log: BashLog, width: number): string[] {
 				width,
 				"",
 			);
-		const footer2 =
-			theme?.fg(
-				"dim",
-				ansiTruncate(
-					"  ctrl+t blocks │ shift+tab level │ ctrl+p model │ ctrl+n session │ ctrl+o tools",
-					width,
-					"",
-				),
-			) ??
-			ansiTruncate(
-				"  ctrl+t blocks │ shift+tab level │ ctrl+p model │ ctrl+n session │ ctrl+o tools",
-				width,
-				"",
-			);
 
 		// Command detail view (Enter)
 		if (log.viewMode === "command" && log.cursor >= 0) {
@@ -549,9 +535,8 @@ export function renderLog(log: BashLog, width: number): string[] {
 					}
 				}
 			}
-			while (lines.length < 38) lines.push("");
+			while (lines.length < 39) lines.push("");
 			lines.push(footer1);
-			lines.push(footer2);
 			return lines;
 		}
 
@@ -577,32 +562,44 @@ export function renderLog(log: BashLog, width: number): string[] {
 				lines.push(` ${icon}  ${preview}`);
 				lines.push(" ─".repeat(Math.max(1, Math.floor(width / 2))));
 
+				// Git diff output has box-drawing chars and ANSI artifacts
+				// that break the panel — suppress and show a note instead.
+				const isGitDiff = /\bgit\b.*\bdiff\b/.test(entry.command);
 				if (entry.output) {
-					const rawLines = entry.output.split("\n");
-					// Reserve 2 lines for header + separator
-					const viewH = 38;
-					const maxS = Math.max(0, rawLines.length - viewH);
-					if (log.scrollOffset > maxS) log.scrollOffset = maxS;
-					const end = Math.min(rawLines.length, log.scrollOffset + viewH);
-					const maxW = Math.max(1, width);
-					for (let i = log.scrollOffset; i < end; i++) {
-						let line = rawLines[i]!;
-						// Close any open SGR so colors don't bleed into borders
-						// (framework sanitizeLine strips dangerous sequences but
-						//  preserves SGR colors — we must close them per line)
-						if (line.includes("\x1b[")) line += "\x1b[0m";
-						lines.push(ansiTruncate(line, maxW));
+					if (isGitDiff) {
+						lines.push(
+							theme?.fg("dim", " (git diff output suppressed") ??
+								" (git diff output suppressed",
+						);
+						lines.push(
+							theme?.fg("dim", "  to avoid breaking the panel") ??
+								"  to avoid breaking the panel",
+						);
+					} else {
+						const rawLines = entry.output.split("\n");
+						// Reserve 3 lines for header + separator + footer
+						const viewH = 37;
+						const maxS = Math.max(0, rawLines.length - viewH);
+						if (log.scrollOffset > maxS) log.scrollOffset = maxS;
+						const end = Math.min(rawLines.length, log.scrollOffset + viewH);
+						const maxW = Math.max(1, width);
+						for (let i = log.scrollOffset; i < end; i++) {
+							let line = rawLines[i]!;
+							// Close any open SGR so colors don't bleed into borders
+							// (framework sanitizeLine strips dangerous sequences but
+							//  preserves SGR colors — we must close them per line)
+							if (line.includes("\x1b[")) line += "\x1b[0m";
+							lines.push(ansiTruncate(line, maxW));
+						}
 					}
 				} else {
 					lines.push(" (no output)");
 				}
 			}
-			while (lines.length < 38) lines.push("");
+			while (lines.length < 39) lines.push("");
 			lines.push(footer1);
-			lines.push(footer2);
 			return lines;
 		}
-
 
 		// Commands mode
 		const displayEntries = log.filteredEntries;
@@ -611,9 +608,8 @@ export function renderLog(log: BashLog, width: number): string[] {
 
 		if (total === 0 && !log.searchMode) {
 			lines.push(" No bash commands yet");
-			while (lines.length < 38) lines.push("");
+			while (lines.length < 39) lines.push("");
 			lines.push(footer1);
-			lines.push(footer2);
 			return lines;
 		}
 
@@ -655,9 +651,8 @@ export function renderLog(log: BashLog, width: number): string[] {
 			lines.push(`${cursor}${prefix}${icon}${cmd}`);
 		}
 
-		while (lines.length < 38) lines.push("");
+		while (lines.length < 39) lines.push("");
 		lines.push(footer1);
-		lines.push(footer2);
 		return lines;
 	} catch {
 		return [" Error rendering bash tab"];

@@ -132,7 +132,12 @@ export default function (pi: ExtensionAPI) {
 
 			// Cap: max 250 entries to prevent memory blowup on large sessions
 			const capped = entries.slice(-250);
-			for (const e of capped) {
+			for (let i = 0; i < capped.length; i++) {
+				const e = capped[i]!;
+				// Yield event loop every 10 entries to avoid UI freeze
+				if (i > 0 && i % 10 === 0) {
+					await new Promise((r) => setTimeout(r, 0));
+				}
 				if (e.type !== "message") continue;
 				const m = e.message;
 				if (!m) continue;
