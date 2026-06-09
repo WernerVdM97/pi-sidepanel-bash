@@ -379,7 +379,7 @@ function colorize(tokens: Token[], theme: ThemeColors | null): string {
 // ── ANSI-aware helpers ───────────────────────────────────────────────────
 
 /** Count visible characters, skipping ANSI escape sequences. */
-function ansiLen(str: string): number {
+export function ansiLen(str: string): number {
 	let n = 0;
 	let esc = false;
 	for (let i = 0; i < str.length; i++) {
@@ -397,8 +397,18 @@ function ansiLen(str: string): number {
 }
 
 /** Truncate an ANSI-string to max visible width, appending ellipsis. */
-function ansiTruncate(str: string, maxW: number, ellip = "…"): string {
+export function ansiTruncate(str: string, maxW: number, ellip = "…"): string {
 	if (maxW <= 0) return "";
+
+	const strLen = ansiLen(str);
+	// Text fits without truncation — just close any open SGR codes
+	if (strLen <= maxW) {
+		const hasAnsi = str.includes("\x1b[");
+		return hasAnsi ? str + "\x1b[0m" : str;
+	}
+
+	// Truncate, leaving room for ellipsis
+	const targetW = Math.max(0, maxW - ansiLen(ellip));
 	let out = "";
 	let vis = 0;
 	let esc = false;
@@ -418,11 +428,11 @@ function ansiTruncate(str: string, maxW: number, ellip = "…"): string {
 			}
 			continue;
 		}
-		if (vis >= maxW) break;
+		if (vis >= targetW) break;
 		out += ch;
 		vis++;
 	}
-	if (str.length > out.length || ansiLen(str) > maxW) out += ellip;
+	out += ellip;
 	out += "\x1b[0m";
 	return out;
 }
@@ -457,8 +467,8 @@ export function renderLog(log: BashLog, width: number): string[] {
 		const theme = log._theme;
 		const lines: string[] = [];
 
-		// Keymap footer line
-		const footer =
+		// Keymap footers (pinned to bottom of 40-line viewport)
+		const footer1 =
 			theme?.fg(
 				"dim",
 				ansiTruncate(
@@ -469,6 +479,20 @@ export function renderLog(log: BashLog, width: number): string[] {
 			) ??
 			ansiTruncate(
 				" j/k navigate │ Enter detail │ o output │ / search │ g/G top/bot",
+				width,
+				"",
+			);
+		const footer2 =
+			theme?.fg(
+				"dim",
+				ansiTruncate(
+					"  ctrl+t blocks │ shift+tab level │ ctrl+p model │ ctrl+n session │ ctrl+o tools",
+					width,
+					"",
+				),
+			) ??
+			ansiTruncate(
+				"  ctrl+t blocks │ shift+tab level │ ctrl+p model │ ctrl+n session │ ctrl+o tools",
 				width,
 				"",
 			);
@@ -525,8 +549,9 @@ export function renderLog(log: BashLog, width: number): string[] {
 					}
 				}
 			}
-			while (lines.length < 39) lines.push("");
-			lines.push(footer);
+			while (lines.length < 38) lines.push("");
+			lines.push(footer1);
+			lines.push(footer2);
 			return lines;
 		}
 
@@ -559,7 +584,7 @@ export function renderLog(log: BashLog, width: number): string[] {
 					const maxS = Math.max(0, rawLines.length - viewH);
 					if (log.scrollOffset > maxS) log.scrollOffset = maxS;
 					const end = Math.min(rawLines.length, log.scrollOffset + viewH);
-					const maxW = Math.max(1, width - 2);
+					const maxW = Math.max(1, width);
 					for (let i = log.scrollOffset; i < end; i++) {
 						let line = rawLines[i]!;
 						// Close any open SGR so colors don't bleed into borders
@@ -572,10 +597,12 @@ export function renderLog(log: BashLog, width: number): string[] {
 					lines.push(" (no output)");
 				}
 			}
-			while (lines.length < 39) lines.push("");
-			lines.push(footer);
+			while (lines.length < 38) lines.push("");
+			lines.push(footer1);
+			lines.push(footer2);
 			return lines;
 		}
+
 
 		// Commands mode
 		const displayEntries = log.filteredEntries;
@@ -584,8 +611,9 @@ export function renderLog(log: BashLog, width: number): string[] {
 
 		if (total === 0 && !log.searchMode) {
 			lines.push(" No bash commands yet");
-			while (lines.length < 39) lines.push("");
-			lines.push(footer);
+			while (lines.length < 38) lines.push("");
+			lines.push(footer1);
+			lines.push(footer2);
 			return lines;
 		}
 
@@ -627,8 +655,9 @@ export function renderLog(log: BashLog, width: number): string[] {
 			lines.push(`${cursor}${prefix}${icon}${cmd}`);
 		}
 
-		while (lines.length < 39) lines.push("");
-		lines.push(footer);
+		while (lines.length < 38) lines.push("");
+		lines.push(footer1);
+		lines.push(footer2);
 		return lines;
 	} catch {
 		return [" Error rendering bash tab"];
