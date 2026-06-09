@@ -1,5 +1,7 @@
 # pi-sidepanel-bash
 
+> 🤖 This code is an AI-generated proof-of-concept. Use at your own risk.
+
 Bash command history tab for [pi-sidepanel](https://github.com/WernerVdM97/pi-sidepanel). Session-persistent, vim-style cursor navigation, expand/collapse command details, output viewer, search, syntax highlighting, and full theme color support. Most recent commands appear at the top.
 
 ## Keybindings
