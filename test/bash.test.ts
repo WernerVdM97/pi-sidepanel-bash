@@ -352,7 +352,7 @@ describe("Rendering", () => {
 		);
 	});
 
-	it("output view shows output text", () => {
+	it("output view shows output text with command header", () => {
 		const log = new BashLog();
 		log.add({
 			id: "t1",
@@ -364,7 +364,8 @@ describe("Rendering", () => {
 		log.toggleOutput();
 		const lines = renderLog(log, 40);
 		assert.ok(lines.some((l) => l.includes("file1")));
-		assert.ok(!lines.some((l) => l.includes("ls")));
+		// Command header now shown at top of output view
+		assert.ok(lines.some((l) => l.includes("ls")));
 	});
 
 	it("output view shows placeholder for no output", () => {

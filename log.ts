@@ -516,13 +516,39 @@ export function renderLog(log: BashLog, width: number): string[] {
 		if (log.viewMode === "output" && log.cursor >= 0) {
 			const entry = log.entries[log.cursor];
 			if (entry) {
+				// Command header — same as detail view
+				const icon =
+					entry.exitCode === null
+						? "…"
+						: entry.exitCode === 0
+							? theme
+								? theme.fg("success", "✓")
+								: "✓"
+							: theme
+								? theme.fg("error", "✗")
+								: "✗";
+				const preview =
+					entry.command.length > 30
+						? entry.command.slice(0, 29) + "…"
+						: entry.command;
+				lines.push(` ${icon}  ${preview}`);
+				lines.push(" ─".repeat(Math.max(1, Math.floor(width / 2))));
+
 				if (entry.output) {
-					const outLines = entry.output.split("\n");
-					const maxS = Math.max(0, outLines.length - 40);
+					const rawLines = entry.output.split("\n");
+					// Reserve 2 lines for header + separator
+					const viewH = 38;
+					const maxS = Math.max(0, rawLines.length - viewH);
 					if (log.scrollOffset > maxS) log.scrollOffset = maxS;
-					const end = Math.min(outLines.length, log.scrollOffset + 40);
+					const end = Math.min(rawLines.length, log.scrollOffset + viewH);
+					const maxW = Math.max(1, width - 2);
 					for (let i = log.scrollOffset; i < end; i++) {
-						lines.push(outLines[i]!);
+						let line = rawLines[i]!;
+						// Close any open SGR so colors don't bleed into borders
+						// (framework sanitizeLine strips dangerous sequences but
+						//  preserves SGR colors — we must close them per line)
+						if (line.includes("\x1b[")) line += "\x1b[0m";
+						lines.push(ansiTruncate(line, maxW));
 					}
 				} else {
 					lines.push(" (no output)");
