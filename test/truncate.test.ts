@@ -16,7 +16,8 @@ describe("ansiTruncate", () => {
 
 	it("does not exceed maxW for ANSI-colored text", () => {
 		// Simulate grep --color output: ANSI codes around matches
-		const colored = "\x1b[32mgreen\x1b[0m \x1b[31mred\x1b[0m with trailing text that overflows";
+		const colored =
+			"\x1b[32mgreen\x1b[0m \x1b[31mred\x1b[0m with trailing text that overflows";
 		const result = ansiTruncate(colored, 15);
 		const visible = ansiLen(result);
 		assert.ok(
@@ -175,7 +176,8 @@ describe("renderLog git diff suppression", () => {
 			id: "t1",
 			command: "cd repo && git diff",
 			exitCode: 0,
-			output: "diff --git a/file.ts b/file.ts\n--- a/file.ts\n+++ b/file.ts\n@@ -1,3 +1,4 @@\n old\n+new",
+			output:
+				"diff --git a/file.ts b/file.ts\n--- a/file.ts\n+++ b/file.ts\n@@ -1,3 +1,4 @@\n old\n+new",
 		});
 		log.cursor = 0;
 		log.toggleOutput();
@@ -265,7 +267,9 @@ describe("renderLog git diff suppression", () => {
 	it("output view height never exceeds 40 lines", () => {
 		const log = new BashLog();
 		// Generate enough output lines to fill the viewport
-		const manyLines = Array.from({ length: 50 }, (_, i) => `line ${i}`).join("\n");
+		const manyLines = Array.from({ length: 50 }, (_, i) => `line ${i}`).join(
+			"\n",
+		);
 		log.add({
 			id: "t1",
 			command: "cat many-lines.txt",
