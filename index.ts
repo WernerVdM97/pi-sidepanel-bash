@@ -126,18 +126,17 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event: any, ctx: any) => {
 		log.reset();
+		registered = false;
+
+		// Register tab immediately — framework shows empty state while we replay
+		registerTab();
 
 		try {
 			const entries: SessionEntry[] = ctx.sessionManager.getEntries();
 
 			// Cap: max 250 entries to prevent memory blowup on large sessions
 			const capped = entries.slice(-250);
-			for (let i = 0; i < capped.length; i++) {
-				const e = capped[i]!;
-				// Yield event loop every 10 entries to avoid UI freeze
-				if (i > 0 && i % 10 === 0) {
-					await new Promise((r) => setTimeout(r, 0));
-				}
+			for (const e of capped) {
 				if (e.type !== "message") continue;
 				const m = e.message;
 				if (!m) continue;
@@ -173,10 +172,11 @@ export default function (pi: ExtensionAPI) {
 					}
 				}
 			}
-		} finally {
-			// Always register the tab, even if session replay fails
-			registered = false;
-			registerTab();
+
+			// Emit invalidation so framework re-renders with full data
+			pi.events.emit("sidepanel:invalidate", { tabId: "bash" });
+		} catch {
+			// Replay failed — tab already registered with empty state
 		}
 	});
 
