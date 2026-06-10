@@ -60,6 +60,22 @@ describe("BashLog output truncation", () => {
 		);
 	});
 
+	it("does not split a surrogate pair at the truncation point", () => {
+		const log = new BashLog();
+		// Fill so that the cut at MAX_OUTPUT_BYTES - 1 lands between the two
+		// halves of an astral-plane character (🎉 = 🎉).
+		const filler = "x".repeat(log.MAX_OUTPUT_BYTES - 2);
+		log.add({ id: "t1", command: "emoji", exitCode: 0, output: `${filler}🎉🎉` });
+
+		const stored = log.entries[0]!.output;
+		const beforeEllipsis = stored.charCodeAt(stored.length - 2);
+		assert.ok(
+			!(beforeEllipsis >= 0xd800 && beforeEllipsis <= 0xdbff),
+			"truncated output must not end in a lone high surrogate",
+		);
+		assert.ok(stored.endsWith("…"));
+	});
+
 	it("truncates output stored directly via add()", () => {
 		const log = new BashLog();
 		const bigOutput = "y".repeat(100_000);
@@ -136,6 +152,23 @@ describe("BashLog entry cap and eviction", () => {
 
 		// Cursor should still be valid
 		assert.ok(log.cursor >= -1 && log.cursor < log.entries.length);
+	});
+
+	it("eviction does not drift the cursor off the selected entry", () => {
+		// Regression: eviction removes the LAST index, so earlier indices are
+		// unchanged — the cursor used to be decremented anyway, creeping the
+		// selection upward once the cap was hit.
+		const log = new BashLog();
+		(log as any).MAX_ENTRIES = 5;
+		for (let i = 0; i < 5; i++) {
+			log.add({ id: `t${i}`, command: `cmd ${i}` });
+		}
+		log.cursor = 2; // cmd 2
+		const selected = log.selectedEntry;
+
+		log.add({ id: "t5", command: "cmd 5" }); // evicts cmd 0 (last index)
+		// Cursor shifted by the unshift at the front, not by the eviction.
+		assert.equal(log.selectedEntry, selected);
 	});
 
 	it("output of evicted entries is freed (no leak)", () => {

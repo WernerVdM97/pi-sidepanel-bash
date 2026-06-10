@@ -66,6 +66,8 @@ export default function (pi: ExtensionAPI) {
 					capturesText(): boolean {
 						return log.searchMode;
 					},
+					// NOTE: no "sidepanel:invalidate" emits here — the framework
+					// invalidates the active tab after delegating input to it.
 					handleInput(data: string): void {
 						// ── Search mode ──────────────────────────────
 						if (log.searchMode) {
@@ -75,16 +77,17 @@ export default function (pi: ExtensionAPI) {
 								log.backspaceSearch();
 							} else if (matchesKey(data, "enter")) {
 								log.acceptSearch();
-							} else if (data.length === 1 && data >= " " && data !== "/") {
+							} else if (data.length === 1 && data >= " ") {
+								// "/" is allowed: it only toggles search from
+								// normal mode, and paths need to be searchable.
 								log.appendSearch(data);
 							}
-							pi.events.emit("sidepanel:invalidate", {
-								tabId: "bash",
-							});
 							return;
 						}
 
 						// ── Normal mode ──────────────────────────────
+						// Paging calls use the viewport height recorded by the
+						// last render, so pages match what's on screen.
 						if (data === "j" || matchesKey(data, "down")) {
 							log.cursorDown();
 						} else if (data === "k" || matchesKey(data, "up")) {
@@ -98,21 +101,17 @@ export default function (pi: ExtensionAPI) {
 						} else if (data === "/") {
 							log.toggleSearch();
 						} else if (matchesKey(data, "pageup")) {
-							log.scrollPageUp(40);
+							log.scrollPageUp();
 						} else if (matchesKey(data, "pagedown")) {
-							log.scrollPageDown(40);
+							log.scrollPageDown();
 						} else if (data === "g") {
 							const result = log.handleG();
 							if (result === "pending") {
 								setTimeout(() => log.resetGPending(), 500);
 							}
 						} else if (data === "G") {
-							log.goToEnd(40);
+							log.goToEnd();
 						}
-
-						pi.events.emit("sidepanel:invalidate", {
-							tabId: "bash",
-						});
 					},
 
 					render(width: number, height?: number): string[] {
@@ -138,7 +137,11 @@ export default function (pi: ExtensionAPI) {
 		// block on large sessions; yield one frame first so the placeholder
 		// actually paints instead of the previous/frozen view.
 		registerTab();
-		pi.events.emit("sidepanel:busy", { tabId: "bash", busy: true });
+		pi.events.emit("sidepanel:busy", {
+			tabId: "bash",
+			busy: true,
+			message: "replaying session…",
+		});
 		await new Promise((resolve) => setTimeout(resolve, 24));
 
 		try {
@@ -190,6 +193,20 @@ export default function (pi: ExtensionAPI) {
 			pi.events.emit("sidepanel:busy", { tabId: "bash", busy: false });
 			pi.events.emit("sidepanel:invalidate", { tabId: "bash" });
 		}
+	});
+
+	// ── Framework ready — re-register (load-order fallback) ──────────
+	//
+	// The framework resets its tab registry on its own session_start. If
+	// THIS extension's session_start handler ran first (handler order
+	// follows extension load order), our registration was wiped. The
+	// framework emits "sidepanel:ready" after its reset precisely so tabs
+	// can recover — re-register unconditionally: a guard on `registered`
+	// would skip this (it's already true), and re-registration is
+	// idempotent (the framework dedups by id).
+	pi.events.on("sidepanel:ready", () => {
+		registered = false;
+		registerTab();
 	});
 
 	// ── Tool call — add live entry ────────────────────────────────────

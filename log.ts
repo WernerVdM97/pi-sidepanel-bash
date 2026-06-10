@@ -31,18 +31,27 @@ export class BashLog {
 	MAX_ENTRIES = 250;
 
 	entries: BashEntry[] = [];
+	/** Cursor index into `filteredEntries` (the list as displayed). -1 = none. */
 	cursor = -1;
 	viewMode: "commands" | "command" | "output" = "commands";
 	scrollOffset = 0;
 	searchQuery = "";
 	searchMode = false;
+	/** Last viewport height reported by renderLog — keeps paging and
+	 *  cursor-visibility math in sync with what's actually on screen. */
+	viewportH = 40;
 	private _pendingG = false;
 	_theme: ThemeColors | null = null;
 
 	/** Truncate output to MAX_OUTPUT_BYTES. Appends `…` if clipped. */
 	private trimOutput(raw: string): string {
 		if (raw.length <= this.MAX_OUTPUT_BYTES) return raw;
-		return raw.slice(0, this.MAX_OUTPUT_BYTES - 1) + "…";
+		let clipped = raw.slice(0, this.MAX_OUTPUT_BYTES - 1);
+		// Don't cut a surrogate pair in half — a lone high surrogate renders
+		// as a replacement character.
+		const last = clipped.charCodeAt(clipped.length - 1);
+		if (last >= 0xd800 && last <= 0xdbff) clipped = clipped.slice(0, -1);
+		return clipped + "…";
 	}
 
 	setTheme(theme: ThemeColors): void {
@@ -50,20 +59,25 @@ export class BashLog {
 	}
 
 	add(input: BashEntryInput): void {
-		this.entries.unshift({
+		const entry: BashEntry = {
 			id: input.id,
 			command: input.command,
 			exitCode: input.exitCode ?? null,
 			output: this.trimOutput(input.output ?? ""),
 			timestamp: input.timestamp ?? Date.now(),
 			source: input.source ?? "live",
-		});
-		if (this.cursor >= 0) this.cursor++;
-		// Evict oldest entries when over cap
+		};
+		this.entries.unshift(entry);
+		// The cursor indexes the filtered view — only shift it when the new
+		// entry actually appears there (it lands at index 0 when it does).
+		if (this.cursor >= 0 && this.matchesFilter(entry)) this.cursor++;
+		// Evict oldest entries when over cap. Eviction removes the LAST
+		// index, so existing indices are unchanged — just clamp to bounds.
 		while (this.entries.length > this.MAX_ENTRIES) {
 			this.entries.pop();
-			if (this.cursor > 0) this.cursor = Math.max(0, this.cursor - 1);
 		}
+		const max = this.filteredEntries.length - 1;
+		if (this.cursor > max) this.cursor = max;
 	}
 
 	setResult(id: string, result: { exitCode: number; output: string }): void {
@@ -79,9 +93,22 @@ export class BashLog {
 		this.viewMode = "commands";
 	}
 
+	/** The entry under the cursor, in the filtered (displayed) list. */
+	get selectedEntry(): BashEntry | undefined {
+		return this.cursor >= 0 ? this.filteredEntries[this.cursor] : undefined;
+	}
+
+	private matchesFilter(entry: BashEntry): boolean {
+		if (!this.searchQuery) return true;
+		return entry.command
+			.toLowerCase()
+			.includes(this.searchQuery.toLowerCase());
+	}
+
 	cursorDown(): void {
-		if (this.entries.length === 0) return;
-		if (this.cursor < this.entries.length - 1) {
+		const total = this.filteredEntries.length;
+		if (total === 0) return;
+		if (this.cursor < total - 1) {
 			this.cursor++;
 			this.ensureVisible();
 		}
@@ -94,7 +121,7 @@ export class BashLog {
 		}
 	}
 
-	private ensureVisible(viewportH = 40): void {
+	private ensureVisible(viewportH = this.viewportH): void {
 		if (this.cursor < 0) return;
 		if (this.cursor < this.scrollOffset) this.scrollOffset = this.cursor;
 		else if (this.cursor >= this.scrollOffset + viewportH)
@@ -130,43 +157,61 @@ export class BashLog {
 		}
 	}
 
+	// In output view the scroll methods move through the selected entry's
+	// output lines and must NOT touch the cursor — the cursor selects an
+	// entry, not an output line.
+
 	scrollUp(_vh: number): void {
 		this.scrollOffset = Math.max(0, this.scrollOffset - 1);
-		this.cursor = Math.max(-1, this.cursor - 1);
+		if (this.viewMode === "commands") {
+			this.cursor = Math.max(-1, this.cursor - 1);
+		}
 	}
 
 	scrollDown(vh: number): void {
 		const total =
 			this.viewMode === "output"
-				? (this.entries[this.cursor]?.output.split("\n").length ?? 0)
+				? (this.selectedEntry?.output.split("\n").length ?? 0)
 				: this.filteredEntries.length;
 		const maxS = Math.max(0, total - vh);
 		if (this.scrollOffset < maxS) {
 			this.scrollOffset++;
-			if (this.cursor < total - 1 && this.cursor >= 0) this.cursor++;
+			if (
+				this.viewMode === "commands" &&
+				this.cursor >= 0 &&
+				this.cursor < total - 1
+			) {
+				this.cursor++;
+			}
 		}
 	}
 
-	scrollPageUp(vh: number): void {
+	scrollPageUp(vh = this.viewportH): void {
 		this.scrollOffset = Math.max(0, this.scrollOffset - vh);
-		this.cursor = Math.max(-1, this.cursor - vh);
+		if (this.viewMode === "commands") {
+			this.cursor = Math.max(-1, this.cursor - vh);
+		}
 	}
 
-	scrollPageDown(vh: number): void {
+	scrollPageDown(vh = this.viewportH): void {
 		const total =
 			this.viewMode === "output"
-				? (this.entries[this.cursor]?.output.split("\n").length ?? 0)
+				? (this.selectedEntry?.output.split("\n").length ?? 0)
 				: this.filteredEntries.length;
 		const maxS = Math.max(0, total - vh);
 		this.scrollOffset = Math.min(maxS, this.scrollOffset + vh);
-		if (this.cursor >= 0) this.cursor = Math.min(total - 1, this.cursor + vh);
+		if (this.viewMode === "commands" && this.cursor >= 0) {
+			this.cursor = Math.min(total - 1, this.cursor + vh);
+		}
 	}
 
 	handleG(): "handled" | "pending" {
 		if (this._pendingG) {
 			this._pendingG = false;
-			this.cursor = 0;
 			this.scrollOffset = 0;
+			if (this.viewMode === "commands") {
+				this.cursor = this.filteredEntries.length > 0 ? 0 : -1;
+			}
 			return "handled";
 		}
 		this._pendingG = true;
@@ -177,11 +222,13 @@ export class BashLog {
 		this._pendingG = false;
 	}
 
-	goToEnd(viewportH: number): void {
-		const total =
-			this.viewMode === "output"
-				? (this.entries[this.cursor]?.output.split("\n").length ?? 0)
-				: this.filteredEntries.length;
+	goToEnd(viewportH = this.viewportH): void {
+		if (this.viewMode === "output") {
+			const total = this.selectedEntry?.output.split("\n").length ?? 0;
+			this.scrollOffset = Math.max(0, total - viewportH);
+			return;
+		}
+		const total = this.filteredEntries.length;
 		if (total === 0) return;
 		this.cursor = total - 1;
 		this.scrollOffset = Math.max(0, total - viewportH);
@@ -193,18 +240,42 @@ export class BashLog {
 		return this.entries.filter((e) => e.command.toLowerCase().includes(q));
 	}
 
+	/** The query changed, so cursor indices into the filtered list shifted.
+	 *  Keep the same entry selected when it's still visible; otherwise snap
+	 *  to the top of the (new) filtered list. */
+	private reanchorCursor(previous: BashEntry | undefined): void {
+		const filtered = this.filteredEntries;
+		if (previous) {
+			const idx = filtered.indexOf(previous);
+			if (idx >= 0) {
+				this.cursor = idx;
+				this.ensureVisible();
+				return;
+			}
+		}
+		this.cursor = filtered.length > 0 ? 0 : -1;
+		this.scrollOffset = 0;
+	}
+
 	toggleSearch(): void {
 		this.searchMode = !this.searchMode;
-		if (!this.searchMode) this.searchQuery = "";
+		if (!this.searchMode) {
+			const previous = this.selectedEntry;
+			this.searchQuery = "";
+			this.reanchorCursor(previous);
+		}
 	}
 
 	appendSearch(char: string): void {
+		const previous = this.selectedEntry;
 		this.searchQuery += char;
-		this.cursor = 0;
+		this.reanchorCursor(previous);
 	}
 
 	backspaceSearch(): void {
+		const previous = this.selectedEntry;
 		this.searchQuery = this.searchQuery.slice(0, -1);
+		this.reanchorCursor(previous);
 	}
 
 	acceptSearch(): void {
@@ -565,7 +636,7 @@ export function renderLog(
 
 		// Command detail view (Enter)
 		if (log.viewMode === "command" && log.cursor >= 0) {
-			const entry = log.entries[log.cursor];
+			const entry = log.selectedEntry;
 			if (entry) {
 				const icon =
 					entry.exitCode === null
@@ -622,7 +693,7 @@ export function renderLog(
 
 		// Output view mode (o)
 		if (log.viewMode === "output" && log.cursor >= 0) {
-			const entry = log.entries[log.cursor];
+			const entry = log.selectedEntry;
 			if (entry) {
 				// Command header — same as detail view
 				const icon =
@@ -663,6 +734,9 @@ export function renderLog(
 						const rawLines = entry.output.split("\n");
 						// Reserve 3 lines for header + separator + footer
 						const viewH = Math.max(1, H - 3);
+						// Remember the real viewport so paging in handleInput
+						// (which has no height parameter) matches the screen.
+						log.viewportH = viewH;
 						const maxS = Math.max(0, rawLines.length - viewH);
 						if (log.scrollOffset > maxS) log.scrollOffset = maxS;
 						const end = Math.min(rawLines.length, log.scrollOffset + viewH);
@@ -691,6 +765,9 @@ export function renderLog(
 		// Reserve the last row for the footer (and account for the 2-row search
 		// header when active) so the list never overruns the footer.
 		const viewH = Math.max(1, footerRow - (log.searchMode ? 2 : 0));
+		// Remember the real viewport so paging/visibility in handleInput
+		// (which has no height parameter) matches the screen.
+		log.viewportH = viewH;
 
 		if (total === 0 && !log.searchMode) {
 			lines.push(" No bash commands yet");
@@ -711,7 +788,8 @@ export function renderLog(
 		const end = Math.min(total, log.scrollOffset + viewH);
 		for (let i = log.scrollOffset; i < end; i++) {
 			const entry = displayEntries[i]!;
-			const isCursor = log.entries.indexOf(entry) === log.cursor;
+			// Cursor indexes the filtered (displayed) list directly.
+			const isCursor = i === log.cursor;
 			const isSession = entry.source === "session";
 
 			const icon =

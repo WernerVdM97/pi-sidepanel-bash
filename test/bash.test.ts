@@ -193,6 +193,124 @@ describe("Search", () => {
 	});
 });
 
+// ── Cursor under an active search filter ──────────────────────────────────
+//
+// Regression: the cursor used to index `entries` while goToEnd /
+// scrollPageDown / appendSearch used `filteredEntries`, so with a filter
+// active, G highlighted the wrong entry and Enter/o opened the wrong
+// detail. The cursor now consistently indexes the filtered list.
+
+describe("Cursor in filtered space", () => {
+	let log: BashLog;
+	beforeEach(() => {
+		log = new BashLog();
+		// Newest first after unshift: [git push, echo two, git status, echo one]
+		log.add({ id: "t1", command: "echo one" });
+		log.add({ id: "t2", command: "git status" });
+		log.add({ id: "t3", command: "echo two" });
+		log.add({ id: "t4", command: "git push" });
+	});
+
+	it("selectedEntry resolves through the filtered list", () => {
+		log.toggleSearch();
+		log.appendSearch("git");
+		assert.equal(log.filteredEntries.length, 2);
+		log.cursor = 1;
+		assert.equal(log.selectedEntry?.command, "git status");
+	});
+
+	it("goToEnd selects the last FILTERED entry", () => {
+		log.toggleSearch();
+		log.appendSearch("git");
+		log.goToEnd(40);
+		assert.equal(log.cursor, 1);
+		assert.equal(log.selectedEntry?.command, "git status");
+	});
+
+	it("cursorDown stops at the last filtered entry", () => {
+		log.toggleSearch();
+		log.appendSearch("git");
+		log.cursor = 1;
+		log.cursorDown();
+		assert.equal(log.cursor, 1);
+	});
+
+	it("add() does not shift the cursor when the new entry is filtered out", () => {
+		log.toggleSearch();
+		log.appendSearch("git");
+		log.cursor = 1; // git status
+		log.add({ id: "t5", command: "echo three" }); // does not match filter
+		assert.equal(log.selectedEntry?.command, "git status");
+	});
+
+	it("add() shifts the cursor when the new entry matches the filter", () => {
+		log.toggleSearch();
+		log.appendSearch("git");
+		log.cursor = 1; // git status
+		log.add({ id: "t5", command: "git diff" }); // matches, lands at index 0
+		assert.equal(log.cursor, 2);
+		assert.equal(log.selectedEntry?.command, "git status");
+	});
+
+	it("clearing the search re-anchors the cursor to the same entry", () => {
+		log.toggleSearch();
+		log.appendSearch("git");
+		log.cursor = 1; // git status (index 2 in the full list)
+		log.toggleSearch(); // exits search mode and clears the query
+		assert.equal(log.selectedEntry?.command, "git status");
+		assert.equal(log.cursor, 2);
+	});
+
+	it("narrowing the search away from the selection snaps to the top", () => {
+		log.cursor = 0; // git push
+		log.toggleSearch();
+		log.appendSearch("echo");
+		assert.equal(log.selectedEntry?.command, "echo two");
+		assert.equal(log.cursor, 0);
+	});
+});
+
+// ── Output view scrolling does not move the entry cursor ─────────────────
+
+describe("Output view scroll isolation", () => {
+	function outputLog(): BashLog {
+		const log = new BashLog();
+		log.add({ id: "t1", command: "old", exitCode: 0, output: "x" });
+		log.add({
+			id: "t2",
+			command: "cat big",
+			exitCode: 0,
+			output: Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n"),
+		});
+		log.cursor = 0; // cat big
+		log.toggleOutput();
+		return log;
+	}
+
+	it("goToEnd scrolls output without changing the selected entry", () => {
+		const log = outputLog();
+		log.goToEnd(10);
+		assert.equal(log.selectedEntry?.command, "cat big");
+		assert.equal(log.scrollOffset, 90);
+	});
+
+	it("scrollPageDown scrolls output without changing the selected entry", () => {
+		const log = outputLog();
+		log.scrollPageDown(10);
+		assert.equal(log.selectedEntry?.command, "cat big");
+		assert.ok(log.scrollOffset > 0);
+	});
+
+	it("gg scrolls output to top without changing the selected entry", () => {
+		const log = outputLog();
+		log.scrollOffset = 50;
+		log.handleG();
+		log.handleG();
+		assert.equal(log.selectedEntry?.command, "cat big");
+		assert.equal(log.scrollOffset, 0);
+	});
+});
+
 // ── Scroll ────────────────────────────────────────────────────────────────
 
 describe("Scroll", () => {
