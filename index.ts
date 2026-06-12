@@ -115,7 +115,13 @@ export default function (pi: ExtensionAPI) {
 					},
 
 					render(width: number, height?: number): string[] {
-						return renderLog(log, width, height);
+						try {
+							return renderLog(log, width, height);
+						} catch (err: any) {
+							// If render crashes, show error instead of freezing the panel
+							const msg = err?.message || String(err);
+							return [` bash render error: ${msg}`, "", " resetting view…"];
+						}
 					},
 
 					invalidate(): void {},

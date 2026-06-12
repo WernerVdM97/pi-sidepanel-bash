@@ -59,9 +59,13 @@ export class BashLog {
 	}
 
 	add(input: BashEntryInput): void {
+		// Defensive: ensure command is a valid string
+		const cmd = typeof input.command === "string" ? input.command : String(input.command ?? "");
+		if (!cmd) return;
+
 		const entry: BashEntry = {
 			id: input.id,
-			command: input.command,
+			command: cmd,
 			exitCode: input.exitCode ?? null,
 			output: this.trimOutput(input.output ?? ""),
 			timestamp: input.timestamp ?? Date.now(),
@@ -236,8 +240,14 @@ export class BashLog {
 
 	get filteredEntries(): BashEntry[] {
 		if (!this.searchQuery) return this.entries;
-		const q = this.searchQuery.toLowerCase();
-		return this.entries.filter((e) => e.command.toLowerCase().includes(q));
+		try {
+			const q = this.searchQuery.toLowerCase();
+			return this.entries.filter(
+				(e) => e.command && e.command.toLowerCase().includes(q),
+			);
+		} catch {
+			return this.entries;
+		}
 	}
 
 	/** The query changed, so cursor indices into the filtered list shifted.
@@ -325,13 +335,17 @@ const TOKEN_COLOR: Record<TokenType, string | null> = {
 /**
  * Tokenize a bash command into colored tokens.
  * Handles: commands, flags, strings, variables, operators, redirects, paths.
+ * SAFETY: maxIter prevents infinite loops on malformed input.
  */
 function tokenizeBash(command: string): Token[] {
+	const MAX_ITER = command.length * 4 + 100; // generous but bounded
 	const tokens: Token[] = [];
 	let i = 0;
 	let isFirstWord = true;
+	let iter = 0;
 
-	while (i < command.length) {
+	while (i < command.length && iter < MAX_ITER) {
+		iter++;
 		// Whitespace
 		if (command[i] === " " || command[i] === "\t") {
 			tokens.push({ text: command[i]!, type: "space" });
@@ -609,6 +623,10 @@ export function renderLog(
 	width: number,
 	height = 40,
 ): string[] {
+	// Defensive: guard against NaN / negative / enormous dimensions
+	width = Math.max(1, Math.min(500, Math.floor(width) || 1));
+	height = Math.max(3, Math.min(200, Math.floor(height) || 3));
+
 	try {
 		const theme = log._theme;
 		const lines: string[] = [];
